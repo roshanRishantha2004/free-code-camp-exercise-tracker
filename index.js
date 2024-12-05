@@ -13,7 +13,7 @@ app.use(express.json());
 app.use(express.static('/public'));
 
 const userSchema = new mongoose.Schema({
-  name: {
+  username: {
     type: String,
   }
 });
@@ -21,9 +21,9 @@ const userSchema = new mongoose.Schema({
 const User = mongoose.model('User', userSchema);
 
 const exercisesSchema = new mongoose.Schema({
-    username: {
-      type: String,
-      required: true
+    userId: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'User'
     },
     description: {
       type: String
@@ -51,9 +51,8 @@ app.get('/', (req, res) => {
 
 app.post('/api/users', async (req, res) => {
   try {
-    console.log(req.body.username)
     const user = await User.create({
-      name: req.body.username
+      username: req.body.username
     });
 
     if (!user) {
@@ -61,10 +60,13 @@ app.post('/api/users', async (req, res) => {
         message: 'Invalid user!'
       });
     }
-    console.log(user)
+
     return res.json({
-      user: user
-    })
+      _id: user._id,
+      username: user.username
+    });
+
+    
   } catch (err) {
     res.json({
       message: err.message
@@ -72,51 +74,102 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
+app.get('/api/users', async (req, res) => {
+  try {
+    const user = await User.find();
+    const result = user.map(user => ({
+      _id: user._id,
+      username: user.username
+    }));
+
+    res.json(result);
+  } catch (err) {
+    res.json({
+      message: 'Invalid!'
+    })
+  }
+})
+
 app.post('/api/users/:_id/exercises', async (req, res) => {
   try {
       const { description, duration, date } = req.body;
       const id = req.params._id;
-      console.log(id)
 
       const user = await User.findById(id);
-      console.log(user.name)
-      // if (!mongoose.isValidObjectId(id)) {
-      //   res.json({
-      //     message: 'Invalid user'
-      //   });
-      // }
-
-      let validDate;
-
-      // if (!isNaN(date)) {
-      //   res.json({
-      //     message: 'Invalid date'
-      //   });
-      // }
-
-      validDate = new Date(date);
+      const validDate = date ? new Date(date): new Date();
       const utcDate = validDate.toUTCString();
-      console.log(utcDate)
-
-      // if (!(duration === Number)){
-      //   res.json({
-      //     message: 'Invalid duration'
-      //   })
-      // }
 
       const exercises = await Exercise.create({
-        username: user.name,
+        userId: id,
         description: description,
         duration: duration,
         date: utcDate
       });
 
+      const newUser = {
+        _id: user._id,
+        username: user.username
+      }
+
       res.json({
-        exercises
+        username: user.username,
+        description: exercises.description,
+        duration: exercises.duration,
+        date: exercises.date.toDateString(),
+        _id: user._id
       })
   } catch (err) {
     res.json({
       message: err.message
+    })
+  }
+});
+
+
+app.get('/api/users/:_id/logs', async (req, res) => {
+  try {
+    const id = req.params._id;
+    const { from, to, limit } = req.query;
+    const user = await User.findById(id);
+    console.log(user)
+    // const exercise = await Exercise.find({ userId: id });
+    // console.log(exercise)
+    // const count = await Exercise.countDocuments({ userId: id });
+    // console.log(count);
+
+    const query = { userId: id };
+    if (from) {
+      query.date = { ...query.date, $gte: new Date(from) };
+    }
+    if (to) {
+      query.date = { ...query.date, $lte: new Date(to) };
+    }
+
+    // Fetch exercises with optional limit
+    let exercises = Exercise.find(query).sort({ date: 1 });
+    if (limit) {
+      exercises = exercises.limit(parseInt(limit));
+    }
+    exercises = await exercises;
+    const count = await Exercise.countDocuments({ userId: id });
+
+
+    const log = exercises.map(exercise => ({
+      description: exercise.description,
+      duration: exercise.duration,
+      date: exercise.date.toDateString()
+    }));
+    console.log(log)
+
+    res.json({
+      _id: user._id,
+      username: user.username,
+      count,
+      log
+    })
+  } catch (err) {
+    res.json({
+      message: 'Invalid user!'
     })
   }
 })
